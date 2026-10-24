@@ -78,7 +78,7 @@ export function useSpotEditor({
     if (infospotDraftState) {
       const kept = infospotDraftState.original?.imageKey;
       const unsaved = infospotDraftState.uploads.filter((k) => k !== kept);
-      if (unsaved.length) void deleteMedia(unsaved).catch(() => undefined);
+      if (unsaved.length) void deleteMedia(tour.id, unsaved).catch(() => undefined);
     }
     setHotspotDraft(null);
     setInfospotDraft(null);
@@ -163,7 +163,7 @@ export function useSpotEditor({
     let undone = false;
     // The image is only deleted once the Undo chance has passed.
     const forget = () => {
-      if (!undone && removed.imageKey) void deleteMedia([removed.imageKey]).catch(() => undefined);
+      if (!undone && removed.imageKey) void deleteMedia(tour.id, [removed.imageKey]).catch(() => undefined);
     };
     toast.success("Infospot deleted", {
       duration: UNDO_TOAST_MS,
@@ -283,7 +283,7 @@ export function useSpotEditor({
     const spot = cleanInfospot(infospotDraft.spot);
     saveInfospot(tour.id, infospotDraft.sceneId, spot);
     const unused = unusedImages(infospotDraft, spot.imageKey);
-    if (unused.length) void deleteMedia(unused).catch(() => undefined);
+    if (unused.length) void deleteMedia(tour.id, unused).catch(() => undefined);
     toast.success(infospotDraft.original ? "Infospot updated" : "Infospot added");
     setInfospotDraft(null);
   }

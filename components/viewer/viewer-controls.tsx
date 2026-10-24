@@ -22,7 +22,7 @@ import {
 import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { toast } from "sonner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { useMediaUrl } from "@/lib/media-db";
+import { mediaUrl } from "@/lib/media-db";
 import type { Scene, Tour } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import type { TourViewerMode } from "./tour-viewer";
@@ -123,7 +123,7 @@ function useFullscreen(target: RefObject<HTMLElement | null>) {
 
 /** Loops the tour's ambient sound after the visitor's first interaction, with a mute switch. */
 function useAmbientSound(tour: Tour, enabled: boolean) {
-  const url = useMediaUrl(enabled ? tour.settings.ambientSoundKey : null);
+  const url = mediaUrl(enabled ? tour.settings.ambientSoundKey : null);
   const audio = useRef<HTMLAudioElement | null>(null);
   const [muted, setMuted] = useState(false);
 
@@ -203,7 +203,10 @@ export function ViewerControls({
     }
     try {
       await navigator.clipboard.writeText(url.href);
-      toast.success("Link copied", { description: "Tours are saved in this browser only, so the link opens here." });
+      toast.success("Link copied", {
+        description:
+          tour.status === "published" ? undefined : "This tour is a draft: publish it in Share so others can open the link.",
+      });
     } catch {
       toast.error("Couldn't copy the link.");
     }

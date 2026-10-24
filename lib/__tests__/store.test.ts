@@ -10,7 +10,6 @@ import {
   createHotspotRecord,
   createSceneRecord,
   createTourRecord,
-  migrateStoredTours,
   removeSceneFromTour,
   renameTourScenes,
   reorderTourScenes,
@@ -19,7 +18,15 @@ import {
   tourMediaKeys,
   useTourStore,
   type NewSceneInput,
+  type NewTourInput,
 } from "@/lib/store";
+
+/** Puts a new tour in the store, as the editor has it after loading it from the server. */
+function addTour(input: NewTourInput): string {
+  const tour = createTourRecord(input);
+  useTourStore.getState().insertTour(tour);
+  return tour.id;
+}
 
 function sceneInput(name: string): NewSceneInput {
   return {
@@ -49,7 +56,8 @@ describe("createTourRecord", () => {
       sceneOrder: [],
       scenes: {},
     });
-    expect(tour.id).toMatch(/^[\w-]{10}$/);
+    // A UUID, as the backend stores ids.
+    expect(tour.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
     expect(tour).not.toHaveProperty("address");
     expect(tour.settings).toEqual(DEFAULT_SETTINGS);
   });
@@ -67,23 +75,17 @@ describe("createTourRecord", () => {
   });
 });
 
-describe("store: create tour", () => {
-  it("adds the tour to state and persists it to localStorage", () => {
-    const id = useTourStore
-      .getState()
-      .createTour({ title: "Campus Tour", category: "education", audience: "me" });
+describe("store: tours", () => {
+  it("adds a tour to state", () => {
+    const id = addTour({ title: "Campus Tour", category: "education", audience: "me" });
     const tour = useTourStore.getState().tours[id];
     expect(tour.title).toBe("Campus Tour");
     expect(tour.audience).toBe("me");
-
-    const saved = JSON.parse(localStorage.getItem("tour-builder:tours") ?? "{}");
-    expect(saved.state.tours[id].title).toBe("Campus Tour");
-    expect(saved.state).not.toHaveProperty("createTour");
   });
 
   it("appends scenes in order", () => {
     const store = useTourStore.getState();
-    const id = store.createTour({ title: "T", category: "other" });
+    const id = addTour({ title: "T", category: "other" });
     const [gate] = store.addScenes(id, [sceneInput("Gate")]);
     const [library, lab] = store.addScenes(id, [sceneInput("Library"), sceneInput("Lab")]);
     const tour = useTourStore.getState().tours[id];
@@ -99,7 +101,7 @@ describe("store: create tour", () => {
 
   it("updates fields and bumps updatedAt", () => {
     const store = useTourStore.getState();
-    const id = store.createTour({ title: "Old", category: "other" });
+    const id = addTour({ title: "Old", category: "other" });
     useTourStore.setState((s) => ({ tours: { ...s.tours, [id]: { ...s.tours[id], updatedAt: 0 } } }));
     store.updateTour(id, { title: "New" });
     const tour = useTourStore.getState().tours[id];
@@ -109,7 +111,7 @@ describe("store: create tour", () => {
 
   it("deletes a tour and returns it for media cleanup", () => {
     const store = useTourStore.getState();
-    const id = store.createTour({ title: "T", category: "other" });
+    const id = addTour({ title: "T", category: "other" });
     store.addScenes(id, [sceneInput("A")]);
     const removed = store.deleteTour(id);
     expect(removed?.id).toBe(id);
@@ -227,18 +229,6 @@ describe("scene editing", () => {
     const restored = useTourStore.getState().tours[tour.id];
     expect(restored.scenes[a.id].initialView).toEqual(view);
     expect(restored.scenes[b.id].hotspots[0].arrivalView).toEqual(arrival);
-  });
-});
-
-describe("migrateStoredTours", () => {
-  it("turns on initial views for hotspot travel in tours saved before v2", () => {
-    const old = createTourRecord({ title: "Old", category: "other" });
-    old.settings.enforceInitialViews = false;
-    const migrated = migrateStoredTours({ tours: { [old.id]: old } }, 1);
-    expect(migrated.tours[old.id].settings).toEqual({ ...old.settings, enforceInitialViews: true });
-
-    const current = migrateStoredTours({ tours: { [old.id]: old } }, 2);
-    expect(current.tours[old.id].settings.enforceInitialViews).toBe(false);
   });
 });
 

@@ -11,9 +11,11 @@ import {
   DialogDescription,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { errorMessage } from "@/lib/api";
 import { plural } from "@/lib/format";
 import { baseName, importImage } from "@/lib/image";
 import { useTourStore } from "@/lib/store";
+import { createTour } from "@/lib/tours-api";
 import { cn } from "@/lib/utils";
 import { StepProgress } from "./step-progress";
 import {
@@ -63,7 +65,6 @@ export function CreateTourWizard({
   const [state, dispatch] = useReducer(wizardReducer, initialWizardState);
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const router = useRouter();
-  const createTour = useTourStore((s) => s.createTour);
   const addScenes = useTourStore((s) => s.addScenes);
 
   const creating = progress !== null;
@@ -82,19 +83,28 @@ export function CreateTourWizard({
     const title = state.title.trim();
     const photos = state.photos.filter((p) => p.status === "ready");
     setProgress({ done: 0, total: photos.length });
-    const tourId = createTour({
-      title,
-      category: state.category,
-      address: state.address,
-      audience: state.audience,
-    });
+    let tourId: string;
+    try {
+      tourId = (
+        await createTour({
+          title: title || "Untitled tour",
+          category: state.category,
+          address: state.address.trim() || undefined,
+          audience: state.audience,
+        })
+      ).id;
+    } catch (error) {
+      setProgress(null);
+      toast.error("Couldn't create the tour", { description: errorMessage(error) });
+      return;
+    }
 
     let skipped = state.photos.length - photos.length;
     for (const [index, photo] of photos.entries()) {
       try {
         const size =
           photo.width && photo.height ? { width: photo.width, height: photo.height } : undefined;
-        const image = await importImage(photo.file, { size });
+        const image = await importImage(tourId, photo.file, { size });
         addScenes(tourId, [{ name: baseName(photo.file.name), ...image }]);
       } catch {
         skipped += 1;
@@ -107,7 +117,7 @@ export function CreateTourWizard({
     onOpenChange(false);
     toast.success(`Created “${title}”`, {
       description: skipped
-        ? `${plural(skipped, "photo")} couldn't be read and ${skipped === 1 ? "was" : "were"} skipped.`
+        ? `${plural(skipped, "photo")} couldn't be uploaded and ${skipped === 1 ? "was" : "were"} skipped.`
         : undefined,
     });
     router.push(`/tours/${tourId}/edit`);

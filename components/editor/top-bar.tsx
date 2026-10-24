@@ -6,10 +6,26 @@ import { useState, type MouseEvent } from "react";
 import { LogoMark } from "@/components/logo";
 import { Button } from "@/components/ui/button";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { useSaveStatus } from "@/lib/autosave";
 import { useTourStore } from "@/lib/store";
 import type { Tour } from "@/lib/types";
+import { cn } from "@/lib/utils";
 
 export type EditorMode = "edit" | "view";
+
+/** Whether the latest changes have reached the server. */
+function SaveStatus({ tourId }: { tourId: string }) {
+  const status = useSaveStatus((s) => s[tourId]);
+  if (!status) return null;
+  return (
+    <span
+      role="status"
+      className={cn("hidden px-2 text-xs md:inline", status === "error" ? "text-destructive" : "text-muted-foreground")}
+    >
+      {status === "saving" ? "Saving…" : status === "saved" ? "Saved" : "Not saved"}
+    </span>
+  );
+}
 
 /** The tour title as text that turns into an input on focus. Enter saves, Escape reverts. */
 function InlineTitle({ tour }: { tour: Tour }) {
@@ -93,6 +109,7 @@ export function TopBar({
       </div>
 
       <div className="flex items-center gap-1">
+        <SaveStatus tourId={tour.id} />
         <Button variant="ghost" onClick={onPreview} className="hidden sm:inline-flex">
           <Eye aria-hidden="true" />
           Preview

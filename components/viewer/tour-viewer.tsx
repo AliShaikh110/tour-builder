@@ -16,7 +16,7 @@ import type { VisibleRangePlugin } from "@photo-sphere-viewer/visible-range-plug
 import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState, type ReactNode } from "react";
 import { DEFAULT_ZOOM } from "@/lib/constants";
 import { infospotLabel } from "@/lib/infospots";
-import { MediaUrlCache } from "@/lib/media-db";
+import { mediaUrl } from "@/lib/media-db";
 import { connectParentBridge, TourSDK } from "@/lib/sdk";
 import { playHotspotClick } from "@/lib/sound";
 import type { CameraView, Infospot, Tour } from "@/lib/types";
@@ -44,13 +44,14 @@ const INTRO_MS = 2600;
 /** Quiet time after the last camera move before the SDK's camera:idle fires. */
 const CAMERA_IDLE_MS = 300;
 
-async function resolveMedia(cache: MediaUrlCache, tour: Tour): Promise<TourMediaUrls> {
-  const scenes = tour.sceneOrder.map((id) => tour.scenes[id]).filter(Boolean);
-  const rows = await Promise.all(
-    scenes.map(async (s) => [s.id, await cache.get(s.mediaKey), await cache.get(s.thumbKey)] as const),
-  );
+/** The address of each scene's panorama and thumbnail (resolved after the current render, as before). */
+async function resolveMedia(tour: Tour): Promise<TourMediaUrls> {
   const urls: TourMediaUrls = { panorama: {}, thumbnail: {} };
-  for (const [id, panorama, thumbnail] of rows) {
+  for (const id of tour.sceneOrder) {
+    const scene = tour.scenes[id];
+    if (!scene) continue;
+    const panorama = mediaUrl(scene.mediaKey);
+    const thumbnail = mediaUrl(scene.thumbKey);
     if (panorama) urls.panorama[id] = panorama;
     if (thumbnail) urls.thumbnail[id] = thumbnail;
   }
@@ -105,7 +106,6 @@ export function TourViewer({
   const { settings } = tour;
   const viewerRef = useRef<Viewer | null>(null);
   const [viewerGeneration, setViewerGeneration] = useState(0);
-  const [cache] = useState(() => new MediaUrlCache());
   const [currentId, setCurrentId] = useState<string | null>(null);
   const [infospot, setInfospot] = useState<Infospot | null>(null);
   const [ribbonOpen, setRibbonOpen] = useState(false);
@@ -121,7 +121,6 @@ export function TourViewer({
   useEffect(() => {
     tourRef.current = tour;
   });
-  useEffect(() => () => cache.revokeAll(), [cache]);
 
   const compact = mode === "compact";
   const currentScene = currentId ? tour.scenes[currentId] : null;
@@ -234,13 +233,13 @@ export function TourViewer({
     const viewer = viewerRef.current;
     if (!viewer) return;
     let cancelled = false;
-    void resolveMedia(cache, tourRef.current).then((urls) => {
+    void resolveMedia(tourRef.current).then((urls) => {
       if (!cancelled && viewerRef.current === viewer) applyNodes(viewer, urls);
     });
     return () => {
       cancelled = true;
     };
-  }, [viewerGeneration, signature, cache]);
+  }, [viewerGeneration, signature]);
 
   // --- Tiny planet intro -------------------------------------------------------
 

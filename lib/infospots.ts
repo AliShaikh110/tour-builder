@@ -1,4 +1,4 @@
-import { nanoid } from "nanoid";
+import { newId } from "./utils";
 import type { Infospot, InfospotIcon, InfospotKind, SphericalPosition } from "./types";
 
 export const INFOSPOT_KINDS: { id: InfospotKind; label: string; description: string }[] = [
@@ -18,7 +18,7 @@ export const INFOSPOT_ICONS: { id: InfospotIcon; label: string }[] = [
 
 export function createInfospotRecord(position: SphericalPosition, overrides: Partial<Infospot> = {}): Infospot {
   return {
-    id: nanoid(10),
+    id: newId(),
     position,
     icon: "info",
     scale: 1,

@@ -34,7 +34,6 @@ import { Progress } from "@/components/ui/progress";
 import { plural } from "@/lib/format";
 import { radToDeg } from "@/lib/geometry";
 import { IMAGE_ACCEPT } from "@/lib/image";
-import { deleteMedia } from "@/lib/media-db";
 import { useTourStore } from "@/lib/store";
 import type { Scene, Tour } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -135,10 +134,9 @@ export function ScenesPanel({
     if (!toDelete) return;
     const index = tour.sceneOrder.indexOf(toDelete.id);
     const neighbour = tour.sceneOrder[index + 1] ?? tour.sceneOrder[index - 1];
+    // The server deletes the scene's photos when the tour is next saved.
     const removed = deleteScene(tour.id, toDelete.id);
     if (!removed) return;
-    const keys = [removed.mediaKey, removed.thumbKey, ...removed.infospots.flatMap((i) => i.imageKey ?? [])];
-    void deleteMedia(keys).catch(() => undefined);
     if (removed.id === currentId && neighbour) onSelect(neighbour);
     toast.success(`Deleted “${removed.name}”`);
   }
@@ -267,7 +265,7 @@ export function ScenesPanel({
           <AlertDialogHeader>
             <AlertDialogTitle>Delete “{toDelete?.name}”?</AlertDialogTitle>
             <AlertDialogDescription>
-              The photo is removed from this browser.
+              The photo is deleted from your account.
               {deleteLinks > 0 &&
                 ` ${plural(deleteLinks, "hotspot")} in other scenes that ${deleteLinks === 1 ? "leads" : "lead"} here ${deleteLinks === 1 ? "is" : "are"} removed too.`}{" "}
               This can&apos;t be undone.

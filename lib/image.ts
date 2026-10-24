@@ -71,18 +71,19 @@ export interface ImportedImage {
 }
 
 /**
- * Reads the image size (unless already known), makes a thumbnail and stores
- * both blobs in IndexedDB. Images that are not 2:1 default to a 2D scene
- * unless `displayType` is given.
+ * Reads the image size (unless already known), makes a thumbnail and uploads
+ * both to the tour. Images that are not 2:1 default to a 2D scene unless
+ * `displayType` is given.
  */
 export async function importImage(
+  tourId: string,
   blob: Blob,
   options: { displayType?: DisplayType; size?: { width: number; height: number } } = {},
 ): Promise<ImportedImage> {
   const { displayType } = options;
   const size = options.size ?? (await readImageSize(blob));
   const thumb = await makeThumbnail(blob, size);
-  const [mediaKey, thumbKey] = await Promise.all([putMedia(blob), putMedia(thumb)]);
+  const [mediaKey, thumbKey] = await Promise.all([putMedia(tourId, blob), putMedia(tourId, thumb)]);
   return {
     mediaKey,
     thumbKey,
@@ -92,13 +93,13 @@ export async function importImage(
 }
 
 /**
- * Stores a photo for an infospot, downscaled to `maxWidth` when larger so
- * pop-up images don't fill browser storage. Returns the IndexedDB key.
+ * Uploads a photo for an infospot, downscaled to `maxWidth` when larger so
+ * pop-up images stay quick to load. Returns its media key.
  */
-export async function importInfospotImage(file: Blob, maxWidth = 2048): Promise<string> {
+export async function importInfospotImage(tourId: string, file: Blob, maxWidth = 2048): Promise<string> {
   const size = await readImageSize(file);
   const blob = size.width > maxWidth ? await makeThumbnail(file, size, maxWidth) : file;
-  return putMedia(blob);
+  return putMedia(tourId, blob);
 }
 
 /** How far up from straight down a top-down tile reaches: down to 12° below the horizon. */

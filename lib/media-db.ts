@@ -1,86 +1,49 @@
-import { createStore, del, delMany, get, set, type UseStore } from "idb-keyval";
-import { nanoid } from "nanoid";
-import { useEffect, useState } from "react";
+import { api } from "./api";
+import { enqueue, flushSaves } from "./autosave";
 
-// Image blobs live in IndexedDB; the tour JSON only keeps their keys.
-let mediaStore: UseStore | undefined;
+// Photos, thumbnails and sounds live on the backend. Tours refer to a file by
+// its media id (the "key" in mediaKey, thumbKey, imageKey, ambientSoundKey);
+// this module remembers each file's address.
 
-function store(): UseStore {
-  mediaStore ??= createStore("tour-builder-media", "blobs");
-  return mediaStore;
+const urls = new Map<string, string>();
+
+/** Learns file addresses from the API (the `media` map that comes with every tour). */
+export function rememberMediaUrls(media: Record<string, string>): void {
+  for (const [key, url] of Object.entries(media)) urls.set(key, url);
 }
 
-export async function putMedia(blob: Blob, key: string = nanoid()): Promise<string> {
-  await set(key, blob, store());
-  return key;
+/** The address of a stored file, or null if it isn't known. */
+export function mediaUrl(key: string | null | undefined): string | null {
+  return (key && urls.get(key)) || null;
 }
 
-export function getMedia(key: string): Promise<Blob | undefined> {
-  return get<Blob>(key, store());
+/** Uploads a file to the tour and returns its media id. */
+export async function putMedia(tourId: string, blob: Blob): Promise<string> {
+  const form = new FormData();
+  form.append("file", blob, blob instanceof File ? blob.name : "upload");
+  const media = await api<{ id: string; url: string }>(`/tours/${tourId}/media`, { method: "POST", form });
+  urls.set(media.id, media.url);
+  return media.id;
 }
 
-export async function deleteMedia(keys: Iterable<string>): Promise<void> {
-  const list = [...new Set(keys)];
-  if (list.length === 1) return del(list[0], store());
-  if (list.length > 1) return delMany(list, store());
-}
-
-/**
- * Object URL for a stored blob. The URL is revoked when the key changes or
- * the component unmounts (or is hidden by a navigation Activity).
- */
-export function useMediaUrl(key: string | null | undefined): string | null {
-  const [entry, setEntry] = useState<{ key: string; url: string } | null>(null);
-
-  useEffect(() => {
-    if (!key) return;
-    let cancelled = false;
-    let url: string | null = null;
-    getMedia(key).then(
-      (blob) => {
-        if (cancelled || !blob) return;
-        url = URL.createObjectURL(blob);
-        setEntry({ key, url });
-      },
-      () => {
-        // A missing or unreadable blob just shows the placeholder.
-      },
-    );
-    return () => {
-      cancelled = true;
-      if (url) URL.revokeObjectURL(url);
-    };
-  }, [key]);
-
-  return entry && entry.key === key ? entry.url : null;
+/** Downloads a stored file (for the .zip export and the map tiles). */
+export async function getMedia(key: string): Promise<Blob | undefined> {
+  const url = mediaUrl(key);
+  if (!url) return undefined;
+  const response = await fetch(url).catch(() => null);
+  return response?.ok ? response.blob() : undefined;
 }
 
 /**
- * Object URLs for stored blobs, created on first use and reused, so switching
- * back to a scene is instant. Revoke everything when the owner unmounts.
+ * Deletes files the tour no longer uses (a swapped photo, an unsaved infospot
+ * image...). A waiting save goes first, so the server never sees a file
+ * deleted while the tour still points at it.
  */
-export class MediaUrlCache {
-  private urls = new Map<string, Promise<string | null>>();
-
-  get(key: string): Promise<string | null> {
-    let url = this.urls.get(key);
-    if (!url) {
-      url = getMedia(key).then(
-        (blob) => (blob ? URL.createObjectURL(blob) : null),
-        () => null,
-      );
-      this.urls.set(key, url);
-    }
-    return url;
-  }
-
-  revoke(key: string): void {
-    const url = this.urls.get(key);
-    this.urls.delete(key);
-    void url?.then((u) => u && URL.revokeObjectURL(u));
-  }
-
-  revokeAll(): void {
-    for (const key of [...this.urls.keys()]) this.revoke(key);
-  }
+export async function deleteMedia(tourId: string, keys: Iterable<string>): Promise<void> {
+  void flushSaves(tourId);
+  await Promise.all(
+    [...new Set(keys)].map((key) =>
+      enqueue(tourId, () => api(`/tours/${tourId}/media/${key}`, { method: "DELETE" })),
+    ),
+  );
 }

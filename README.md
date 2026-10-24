@@ -1,8 +1,9 @@
 # Tour Builder
 
-A frontend-only virtual tour builder in the style of CloudPano: 360° photos (scenes) linked by
-clickable hotspots, built in an editor and played in a browser viewer. Everything runs in the
-browser. There is no backend, no login and no database.
+A virtual tour builder in the style of CloudPano: 360° photos (scenes) linked by clickable
+hotspots, built in an editor and played in a browser viewer. Accounts, tours and photos are
+stored by the separate backend in `../photo-sphere-backend` (Express + PostgreSQL); see its
+README to set it up.
 
 The full brief is in [`docs/Virtual Tour Builder – Developer Specification.md`](docs/). It is
 built phase by phase.
@@ -19,12 +20,16 @@ built phase by phase.
 
 ## Run it
 
-Requires Node.js 22 or newer.
+Requires Node.js 22 or newer, and the backend running (by default on http://localhost:4000).
 
 ```bash
 npm install
-npm run dev        # http://localhost:3000
+cp .env.example .env.local   # PowerShell: Copy-Item .env.example .env.local
+npm run dev                  # http://localhost:3333
 ```
+
+`.env.local` holds `NEXT_PUBLIC_API_URL`, the backend's address. Restart `npm run dev` after
+changing it.
 
 | Script | What it does |
 | --- | --- |
@@ -36,15 +41,21 @@ npm run dev        # http://localhost:3000
 
 ## Features
 
-- **Dashboard (`/`)**: tour cards with thumbnail, title, scene count, last edit and a Draft
-  badge. Each card's menu: Open editor, Open viewer, Export as .zip, Delete (deleting also removes
-  its photos). **Import tour** reads a .zip made by Export (see below).
+- **Accounts (`/login`, `/register`)**: email and password. The dashboard and the editor need a
+  login (you come back to the page you asked for afterwards); the header shows your email and
+  **Log out**. If the login expires, the app logs out and opens the login page.
+- **Dashboard (`/`)**: your tours (24 at a time, then **Load more tours**), with thumbnail, title,
+  scene count, last edit and a Draft badge. Each card's menu: Open editor, Open viewer, Export as
+  .zip, Delete (deleting also removes its photos). **Import tour** reads a .zip made by Export
+  (see below).
 - **Create wizard**: seven steps (Title, Address, Category, Photos, Audience, Add-ons, Review),
   one question per screen. Enter moves forward, ▲/▼ move between steps, and completed steps in
   the progress bar can be revisited. Photos are checked for the 2:1 panorama ratio; other images
   become 2D scenes. **Create tour** saves a draft and opens the editor.
 - **Start from demo tour**: downloads three panoramas of Cape Florida Light from the Photo Sphere
-  Viewer demo data into IndexedDB and links them both ways.
+  Viewer demo data, uploads them to a new tour and links them both ways.
+- **Saving**: every edit shows at once and is saved to the server about a second later (the top
+  bar shows Saving… / Saved / Not saved). Closing the tab while a save is waiting asks first.
 - **Editor (`/tours/[id]/edit`)**
   - Top bar: logo (back to tours), Editing/Viewing toggle, inline-editable title (Enter saves,
     Escape reverts), Share. In Viewing mode the editing tools hide and ‹ › arrows move between
@@ -92,7 +103,7 @@ npm run dev        # http://localhost:3000
     rebuilt from the validated video id (`lib/embeds.ts`). To embed a video, paste its Share ›
     Embed code.
   - Uploaded images wider than 2048 px are downscaled. Images of unsaved or deleted infospots
-    are removed from browser storage (after the Undo window for deletes).
+    are deleted from the server (after the Undo window for deletes).
 - **Initial views and navigation**
   - **Set Initial View** saves the current direction and zoom ("Initial view has been set").
   - **Set Initial View Coming From…** lists the scenes that link here; "Use current view" saves
@@ -100,7 +111,7 @@ npm run dev        # http://localhost:3000
   - **Reset All** clears initial views and coming-from views, with Undo.
   - Travelling by hotspot faces: the hotspot's arrival view if set; else the target's initial
     view when "Always open scenes at their initial view" is on (Settings › Navigation, on by
-    default; tours saved before it defaulted to on are switched on once); else the same compass
+    default); else the same compass
     heading (`targetYaw = currentYaw − northOffsetA + northOffsetB`, level pitch, same zoom).
     Opening a scene from the list, arrows or a URL uses its initial view (or yaw 0).
 
@@ -130,7 +141,9 @@ npm run dev        # http://localhost:3000
   - Controls: drag and zoom, ‹ › to the previous/next scene in the ribbon, show/hide the ribbon,
     share (system share sheet or copy link), full screen, VR (phones and tablets that support
     it), ambient sound mute, zoom +/–, hide controls, and a first-visit "Click and drag to
-    explore" hint. The page adds **Edit tour** and **Go to dashboard**; the embed has neither.
+    explore" hint. For the tour's owner (or an admin) the page adds **Edit tour** and **Go to
+    dashboard**; visitors and the embed get neither.
+  - Visitors (and every embed) see only published tours; the owner can also open a draft.
   - The address keeps `?scene=` in step, so a copied link opens the same scene.
   - Hotspot travel uses the Phase 4 arrival rule; ribbon, arrows and links open scenes at
     their initial view. 2D scenes show flat over a blurred copy, with the ribbon still usable.
@@ -142,7 +155,8 @@ npm run dev        # http://localhost:3000
   delay), compass, lock horizontal view, always open scenes at their initial view.
 
 - **Share** (editor rail, or Share in the top bar)
-  - "Saved in this browser only" note: export to move a tour.
+  - **Published** switch: a draft's link only opens for you; a published tour opens for anyone
+    with the link or the embed.
   - Link to `/tours/[id]` with Copy, an optional "Start at <current scene>" (`?scene=`), and Open
     the viewer.
   - `<iframe>` embed code for `/embed/[id]` (full width, 480 px high, fullscreen and VR allowed,
@@ -160,16 +174,15 @@ tour.json          { format: "tour-builder", version: 1, exportedAt, tour, media
 media/<key>.<ext>  every panorama, thumbnail, infospot image and the ambient sound
 ```
 
-`media` maps each storage key the tour uses to `{ path, type }`. Files are stored uncompressed
-(photos are already compressed). Export stops with a message if any file is missing from browser
-storage.
+`media` maps each media key the tour uses to `{ path, type }`. Files are stored uncompressed
+(photos are already compressed). Export stops with a message if any file is missing on the server.
 
 **Import tour** (dashboard) checks that the file is a version-1 Tour Builder export and that every
-file the tour refers to is inside, saves the media under new keys, gives the tour, its scenes,
-hotspots and infospots new ids (hotspot targets and the cover follow), fills in any settings the
-file lacks with defaults, and adds it as a draft. Importing the same file twice gives two
-independent tours. If saving fails part-way (for example when storage is full), the files already
-saved are removed again.
+file the tour refers to is inside, creates a new tour, uploads the media into it, gives the
+scenes, hotspots and infospots new ids (hotspot targets and the cover follow), fills in any
+settings the file lacks with defaults, and saves it as a draft. Importing the same file twice
+gives two independent tours. If the import fails part-way, the half-made tour and the files
+already uploaded are deleted again.
 
 ## Developer SDK
 
@@ -251,16 +264,22 @@ await tour("goToScene", "<sceneId>");
 
 ## How data is stored
 
-- Tour JSON (scenes, hotspots, settings) is in `localStorage` under `tour-builder:tours`
-  (Zustand `persist`).
-- Images and 512 px thumbnails are Blobs in IndexedDB (`tour-builder-media`), referenced by key.
-  Object URLs are created when shown and revoked when the component unmounts.
+- Everything lives on the backend (PostgreSQL tables `users`, `tours`, `media`, `scenes`,
+  `hotspots`, `infospots`, and the uploaded files). `lib/api.ts` is the only code that calls it.
+- The login token is kept in `localStorage` (`photo-sphere:token`); `lib/auth.ts` holds the
+  logged-in user.
+- An open tour lives in the Zustand store (`lib/store.ts`), so edits apply instantly.
+  `lib/autosave.ts` watches the store and sends a changed tour to `PUT /api/tours/:id` 800 ms
+  after the last change, one request at a time per tour.
+- Files are uploaded with `POST /api/tours/:id/media`. A tour refers to a file by its media id
+  (`mediaKey`, `thumbKey`, `imageKey`, `ambientSoundKey`); `lib/media-db.ts` knows each file's
+  address. Ids of new scenes, hotspots and infospots are UUIDs made in the browser.
 - Angles are stored in radians. The UI shows degrees.
 
 ## Stack
 
 Next.js 16 (App Router, Cache Components), React 19, TypeScript, Tailwind CSS 4, shadcn/ui
-(Radix), lucide-react, sonner, Zustand, idb-keyval, nanoid, dnd-kit, Photo Sphere Viewer 5 with
+(Radix), lucide-react, sonner, Zustand, nanoid, dnd-kit, Photo Sphere Viewer 5 with
 the markers, virtual-tour, gallery, autorotate, compass, gyroscope, stereo and visible-range
 plugins, JSZip (export/import), Vitest. `three` is pinned to
 the version `@photo-sphere-viewer/core` depends on, so only one copy is bundled.
@@ -275,13 +294,10 @@ scenes with `setPanorama`.
 
 ## Limits
 
-- Tours are saved in this browser only. Clearing site data deletes them, and a tour link does not
-  work in another browser.
-- Large panoramas use real storage space. Browsers cap IndexedDB per site.
-- The embed reads the tour from this browser's storage. Browsers give an iframe inside another
-  site its own, separate storage, so on a different site the embed shows "This tour isn't
-  available here". It does work on pages from the same site (another `localhost` port, for
-  example). Real publishing needs a backend, which is out of scope.
+- Uploads are limited by the backend's `MAX_UPLOAD_MB` (25 MB by default) per file.
+- Two tabs editing the same tour at once: the last save wins.
+- There is no admin page in the app. Admins use the API (`/api/admin/...`, see the backend
+  README) and can open any tour by its link.
 - Custom HTML, CSS and scripts that run inside a published tour (CloudPano's Developer feature)
   aren't included. The only author code is the HTML infospot, which stays in its sandbox. Use
   the SDK from your own page instead.

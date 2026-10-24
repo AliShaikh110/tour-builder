@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { toast } from "sonner";
+import { errorMessage } from "@/lib/api";
 import { plural } from "@/lib/format";
 import { baseName, importImage, isAcceptedImage, isEquirectangular, readImageSize } from "@/lib/image";
 import { deleteMedia } from "@/lib/media-db";
@@ -93,35 +94,38 @@ export function useSceneUpload(tourId: string, onAdded?: (sceneIds: string[]) =>
 
     const added: string[] = [];
     let failed = unreadable;
+    let uploadError: unknown = null;
     for (const [index, item] of queue.entries()) {
       setProgress({ done: index, total: queue.length, current: item.file.name });
       try {
         const panorama = isEquirectangular(item.width, item.height);
-        const image = await importImage(item.file, {
+        const image = await importImage(tourId, item.file, {
           size: { width: item.width, height: item.height },
           displayType: panorama ? "360" : "2d",
         });
         added.push(...addScenes(tourId, [{ name: baseName(item.file.name), ...image }]));
-      } catch {
+      } catch (error) {
         failed += 1;
+        uploadError = error;
       }
     }
     setProgress(null);
 
     const skipped = sized.length - queue.length;
+    const reason = uploadError ? errorMessage(uploadError) : "";
     if (added.length) {
       toast.success(`Added ${plural(added.length, "scene")}`, {
         description:
           [
             skipped ? `${plural(skipped, "non-360° photo")} skipped.` : "",
-            failed ? `${plural(failed, "photo")} couldn't be read.` : "",
+            failed ? `${plural(failed, "photo")} couldn't be uploaded. ${reason}` : "",
           ]
             .filter(Boolean)
             .join(" ") || undefined,
       });
       onAdded?.(added);
     } else if (failed) {
-      toast.error(`${plural(failed, "photo")} couldn't be read`);
+      toast.error(`${plural(failed, "photo")} couldn't be uploaded`, { description: reason || undefined });
     }
   }
 
@@ -147,17 +151,17 @@ export function useSceneUpload(tourId: string, onAdded?: (sceneIds: string[]) =>
       setProgress({ done: 0, total: 1, current: file.name });
     }
     try {
-      const image = await importImage(file, {
+      const image = await importImage(tourId, file, {
         size: { width: item.width, height: item.height },
         displayType: panorama ? "360" : "2d",
       });
       const previous = updateScene(tourId, scene.id, image);
-      if (previous) void deleteMedia([previous.mediaKey, previous.thumbKey]).catch(() => undefined);
+      if (previous) void deleteMedia(tourId, [previous.mediaKey, previous.thumbKey]).catch(() => undefined);
       toast.success(`Swapped the image of “${scene.name}”`, {
         description: "Its hotspots and settings were kept.",
       });
-    } catch {
-      toast.error(`Couldn't read ${file.name}`);
+    } catch (error) {
+      toast.error(`Couldn't upload ${file.name}`, { description: errorMessage(error) });
     } finally {
       setProgress(null);
     }

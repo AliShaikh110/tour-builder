@@ -1,9 +1,9 @@
 import JSZip from "jszip";
-import { nanoid } from "nanoid";
 import { DEFAULT_SETTINGS } from "./constants";
-import { deleteMedia, getMedia, putMedia } from "./media-db";
+import { getMedia } from "./media-db";
 import { mergeSettings, tourMediaKeys } from "./store";
 import type { Scene, Tour } from "./types";
+import { newId } from "./utils";
 
 export const EXPORT_FORMAT = "tour-builder";
 export const EXPORT_VERSION = 1;
@@ -78,7 +78,7 @@ export async function exportTour(
     media[key] = { path, type };
   }
   if (missing.length) {
-    throw new TourFileError(`${missing.length} of this tour's files are missing from browser storage, so it can't be exported.`);
+    throw new TourFileError(`${missing.length} of this tour's files are missing on the server, so it can't be exported.`);
   }
 
   const manifest: TourExport = {
@@ -97,11 +97,11 @@ export async function exportTour(
 
 /**
  * Gives a tour fresh ids everywhere (tour, scenes, hotspots, infospots) and
- * points media at new keys, so an import never collides with what is
- * already in this browser.
+ * points media at new keys, so an import never collides with a tour that
+ * already exists.
  */
 export function remapTour(tour: Tour, mediaKeys: Record<string, string>, now = Date.now()): Tour {
-  const sceneIds = Object.fromEntries(tour.sceneOrder.map((id) => [id, nanoid(10)]));
+  const sceneIds = Object.fromEntries(tour.sceneOrder.map((id) => [id, newId()]));
   const key = (k: string) => mediaKeys[k] ?? k;
 
   const scenes: Record<string, Scene> = {};
@@ -115,10 +115,10 @@ export function remapTour(tour: Tour, mediaKeys: Record<string, string>, now = D
       thumbKey: key(scene.thumbKey),
       hotspots: scene.hotspots
         .filter((h) => sceneIds[h.targetSceneId])
-        .map((h) => ({ ...h, id: nanoid(10), targetSceneId: sceneIds[h.targetSceneId] })),
+        .map((h) => ({ ...h, id: newId(), targetSceneId: sceneIds[h.targetSceneId] })),
       infospots: scene.infospots.map((i) => ({
         ...i,
-        id: nanoid(10),
+        id: newId(),
         ...(i.imageKey ? { imageKey: key(i.imageKey) } : {}),
       })),
     };
@@ -129,7 +129,7 @@ export function remapTour(tour: Tour, mediaKeys: Record<string, string>, now = D
 
   const next: Tour = {
     ...tour,
-    id: nanoid(10),
+    id: newId(),
     status: "draft",
     createdAt: now,
     updatedAt: now,
@@ -164,8 +164,8 @@ function parseManifest(text: string): TourExport {
 }
 
 /**
- * Reads an exported .zip: checks it, saves its media under new keys and
- * returns the tour with fresh ids, ready to insert.
+ * Reads an exported .zip: checks it, saves its media with `writeMedia`
+ * (e.g. uploads them to a tour) and returns the tour with fresh ids.
  */
 export async function importTour(
   file: Blob | ArrayBuffer | Uint8Array,
@@ -175,8 +175,8 @@ export async function importTour(
     removeMedia?: (keys: string[]) => Promise<void>;
   } = {},
 ): Promise<Tour> {
-  const writeMedia = options.writeMedia ?? ((blob: Blob) => putMedia(blob));
-  const removeMedia = options.removeMedia ?? deleteMedia;
+  const writeMedia = options.writeMedia ?? (() => Promise.reject(new Error("importTour needs writeMedia to store files.")));
+  const removeMedia = options.removeMedia ?? (async () => {});
   let zip: JSZip;
   try {
     zip = await JSZip.loadAsync(file);

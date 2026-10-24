@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { RequireAuth } from "@/components/auth/require-auth";
 import { BrowserOnly } from "@/components/browser-only";
 import { Editor } from "@/components/editor/editor";
 
@@ -21,7 +22,9 @@ function EditorSkeleton() {
 export default function EditTourPage({ params }: PageProps<"/tours/[tourId]/edit">) {
   return (
     <BrowserOnly fallback={<EditorSkeleton />}>
-      <Editor params={params} />
+      <RequireAuth>
+        <Editor params={params} />
+      </RequireAuth>
     </BrowserOnly>
   );
 }

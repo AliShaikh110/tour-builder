@@ -5,7 +5,9 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { use } from "react";
 import { Button } from "@/components/ui/button";
+import { useCurrentUser } from "@/lib/auth";
 import { useTour } from "@/lib/store";
+import { loadViewerTour } from "@/lib/tours-api";
 import { ControlButton } from "./viewer-controls";
 import { TourViewer } from "./tour-viewer";
 
@@ -37,15 +39,22 @@ export function TourPlayerPage({
   const { tourId } = use(params);
   const { scene } = use(searchParams);
   const router = useRouter();
-  const tour = useTour(tourId);
   const embed = mode === "embed";
+  const user = useCurrentUser();
+  // Owners (and admins) see their tour on the page, drafts included; everyone else, and every embed, the published one.
+  const load = use(loadViewerTour(tourId, !embed && user !== null));
+  const tour = useTour(tourId);
 
-  if (!tour) {
+  if (!load.ok || !tour) {
     return (
       <Message
         icon={MapPinOff}
-        title="This tour isn't available here"
-        body="Tours are saved in the browser that created them, so this link only opens in that browser."
+        title="This tour isn't available"
+        body={
+          !load.ok && load.status === 0
+            ? load.message
+            : "It may not be published yet, or the link may be wrong."
+        }
         embed={embed}
       />
     );
@@ -68,7 +77,7 @@ export function TourPlayerPage({
           window.history.replaceState(window.history.state, "", url);
         }}
         ownerActions={
-          embed ? null : (
+          embed || !load.canEdit ? null : (
             <>
               <ControlButton icon={PencilLine} label="Edit tour" onClick={() => router.push(`/tours/${tour.id}/edit`)} />
               <ControlButton icon={LayoutGrid} label="Go to dashboard" onClick={() => router.push("/")} />

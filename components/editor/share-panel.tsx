@@ -1,15 +1,17 @@
 "use client";
 
-import { Download, ExternalLink, HardDrive, LoaderCircle } from "lucide-react";
+import { Download, ExternalLink, Globe, LoaderCircle } from "lucide-react";
 import { useId, useState, type FocusEvent, type ReactNode } from "react";
 import { CopyButton } from "@/components/copy-button";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { useTourExport } from "@/components/use-tour-export";
 import { embedCode, tourLink } from "@/lib/share";
+import { useTourStore } from "@/lib/store";
 import type { Tour } from "@/lib/types";
 
 function selectAll(event: FocusEvent<HTMLInputElement | HTMLTextAreaElement>) {
@@ -32,7 +34,10 @@ export function SharePanel({ tour, currentId }: { tour: Tour; currentId: string 
   const [origin] = useState(() => window.location.origin);
   const [atScene, setAtScene] = useState(false);
   const sceneCheckId = useId();
+  const publishId = useId();
+  const updateTour = useTourStore((s) => s.updateTour);
   const { exporting, exportTour } = useTourExport();
+  const published = tour.status === "published";
 
   const currentScene = currentId ? tour.scenes[currentId] : undefined;
   const link = tourLink(origin, tour.id, atScene ? currentScene?.id : null);
@@ -46,14 +51,22 @@ export function SharePanel({ tour, currentId }: { tour: Tour; currentId: string 
 
       <div className="min-h-0 flex-1 space-y-6 overflow-y-auto px-4 pb-4">
         <div className="flex gap-3 rounded-lg bg-primary/8 p-3 ring-1 ring-primary/20">
-          <HardDrive className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden="true" />
-          <div className="text-xs">
-            <p className="text-sm font-medium">Saved in this browser only</p>
+          <Globe className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden="true" />
+          <div className="min-w-0 flex-1 text-xs">
+            <Label htmlFor={publishId} className="text-sm font-medium">
+              Published
+            </Label>
             <p className="mt-1 text-pretty text-muted-foreground">
-              Export the tour to move it. The link opens it only in this browser, and the embed only on pages
-              from this same site, because browsers give frames inside other sites their own storage.
+              {published
+                ? "Anyone with the link or the embed can view this tour."
+                : "Draft: only you can open the link. Publish to let visitors see the tour."}
             </p>
           </div>
+          <Switch
+            id={publishId}
+            checked={published}
+            onCheckedChange={(checked) => updateTour(tour.id, { status: checked ? "published" : "draft" })}
+          />
         </div>
 
         <Section title="Link">
@@ -98,8 +111,8 @@ export function SharePanel({ tour, currentId }: { tour: Tour; currentId: string 
 
         <Section title="Export">
           <p className="text-xs text-pretty text-muted-foreground">
-            Download the tour with all its photos and sounds as one .zip file. Import it from the dashboard in any
-            browser to carry on editing there.
+            Download the tour with all its photos and sounds as one .zip file. Import it from the dashboard to make
+            a copy, in this account or another one.
           </p>
           <Button variant="secondary" onClick={() => void exportTour(tour)} disabled={exporting}>
             {exporting ? (

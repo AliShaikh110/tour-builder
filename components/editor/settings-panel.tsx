@@ -10,7 +10,8 @@ import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { TourViewer } from "@/components/viewer/tour-viewer";
-import { deleteMedia, putMedia, useMediaUrl } from "@/lib/media-db";
+import { errorMessage } from "@/lib/api";
+import { deleteMedia, mediaUrl, putMedia } from "@/lib/media-db";
 import { useTourStore, type SettingsPatch } from "@/lib/store";
 import type { AutoRotateSpeed, Tour } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -53,7 +54,7 @@ function AmbientSoundField({ tour, update }: { tour: Tour; update: (patch: Setti
   const input = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const key = tour.settings.ambientSoundKey;
-  const url = useMediaUrl(key);
+  const url = mediaUrl(key);
 
   async function handleFile(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
@@ -69,9 +70,11 @@ function AmbientSoundField({ tour, update }: { tour: Tour; update: (patch: Setti
     }
     setBusy(true);
     try {
-      const previous = update({ ambientSoundKey: await putMedia(file) });
-      if (previous) void deleteMedia([previous]).catch(() => undefined);
+      const previous = update({ ambientSoundKey: await putMedia(tour.id, file) });
+      if (previous) void deleteMedia(tour.id, [previous]).catch(() => undefined);
       toast.success("Ambient sound added", { description: "It loops once visitors first tap or click." });
+    } catch (error) {
+      toast.error("Couldn't upload that sound", { description: errorMessage(error) });
     } finally {
       setBusy(false);
     }
@@ -93,7 +96,7 @@ function AmbientSoundField({ tour, update }: { tour: Tour; update: (patch: Setti
             size="sm"
             onClick={() => {
               const previous = update({ ambientSoundKey: undefined });
-              if (previous) void deleteMedia([previous]).catch(() => undefined);
+              if (previous) void deleteMedia(tour.id, [previous]).catch(() => undefined);
             }}
           >
             <Trash2 aria-hidden="true" />
