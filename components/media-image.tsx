@@ -1,22 +1,29 @@
 "use client";
 
 import { ImageOff } from "lucide-react";
-import { useMediaUrl } from "@/lib/media-db";
+import { useState } from "react";
+import { mediaUrl } from "@/lib/media-db";
 import { cn } from "@/lib/utils";
 
-/** An image stored in IndexedDB, with a quiet placeholder while it loads. */
+/**
+ * An uploaded photo, given by its media key or its address (`src`), with a
+ * quiet placeholder while it loads.
+ */
 export function MediaImage({
   mediaKey,
+  src,
   alt,
   className,
 }: {
-  mediaKey: string | null | undefined;
+  mediaKey?: string | null;
+  src?: string | null;
   alt: string;
   className?: string;
 }) {
-  const url = useMediaUrl(mediaKey);
+  const url = src ?? mediaUrl(mediaKey);
+  const [loadedUrl, setLoadedUrl] = useState<string | null>(null);
 
-  if (!mediaKey) {
+  if (!url) {
     return (
       <span className={cn("flex items-center justify-center bg-muted text-muted-foreground", className)}>
         <ImageOff className="size-6 opacity-60" aria-hidden="true" />
@@ -25,13 +32,15 @@ export function MediaImage({
     );
   }
 
-  if (!url) {
-    return <span className={cn("block animate-pulse bg-muted", className)} aria-label={alt} role="img" />;
-  }
-
   return (
-    // Blob URLs from IndexedDB can't go through next/image optimisation.
+    // Photos come from the backend's storage, not through next/image optimisation.
     // eslint-disable-next-line @next/next/no-img-element
-    <img src={url} alt={alt} draggable={false} className={cn("object-cover", className)} />
+    <img
+      src={url}
+      alt={alt}
+      draggable={false}
+      onLoad={() => setLoadedUrl(url)}
+      className={cn("object-cover", loadedUrl !== url && "animate-pulse bg-muted", className)}
+    />
   );
 }

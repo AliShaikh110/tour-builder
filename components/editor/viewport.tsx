@@ -10,7 +10,7 @@ import { LazyPanoramaViewer } from "@/components/viewer/lazy-panorama-viewer";
 import type { ViewerPlugins } from "@/components/viewer/panorama-viewer";
 import { DEFAULT_ZOOM } from "@/lib/constants";
 import { IMAGE_ACCEPT } from "@/lib/image";
-import { MediaUrlCache } from "@/lib/media-db";
+import { mediaUrl } from "@/lib/media-db";
 import { arrivalView } from "@/lib/navigation";
 import type { CameraView, Scene, Tour } from "@/lib/types";
 import { UploadStatus } from "./scenes-panel";
@@ -91,14 +91,11 @@ export function Viewport({
   banner?: React.ReactNode;
   children?: React.ReactNode;
 }) {
-  const [urls] = useState(() => new MediaUrlCache());
   const [zoom, setZoom] = useState(DEFAULT_ZOOM);
   const [dropping, setDropping] = useState(false);
   // What the viewer shows (or is loading). The same image is never requested
   // twice: two in-flight loads of one URL abort each other inside three.js.
   const loaded = useRef<{ viewer: Viewer; sceneId: string; mediaKey: string; done: boolean } | null>(null);
-
-  useEffect(() => () => urls.revokeAll(), [urls]);
 
   const sceneId = scene?.id ?? null;
   const mediaKey = scene?.mediaKey ?? null;
@@ -123,16 +120,14 @@ export function Viewport({
       return;
     }
 
-    const previous = current?.viewer === viewer && current.done ? current : null;
     const entry = { viewer, sceneId: id, mediaKey: key, done: false };
     loaded.current = entry;
     onSceneLoaded(null);
 
-    const url = await urls.get(key);
-    if (loaded.current !== entry) return; // a newer scene was requested meanwhile
+    const url = mediaUrl(key);
     if (!url) {
       loaded.current = null;
-      toast.error("This scene's photo is missing from browser storage.");
+      toast.error("This scene's photo couldn't be found on the server.");
       return;
     }
     try {
@@ -143,8 +138,6 @@ export function Viewport({
       });
       if (!completed || loaded.current !== entry) return;
       entry.done = true;
-      // The same scene with a new key means its image was swapped: free the old URL.
-      if (previous && previous.sceneId === id && previous.mediaKey !== key) urls.revoke(previous.mediaKey);
       setZoom(Math.round(viewer.getZoomLevel()));
       onSceneLoaded(id);
     } catch {

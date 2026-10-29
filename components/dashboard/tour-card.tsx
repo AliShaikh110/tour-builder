@@ -25,31 +25,37 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { errorMessage } from "@/lib/api";
 import { formatEditedAt, plural } from "@/lib/format";
-import { deleteMedia } from "@/lib/media-db";
-import { coverScene, tourMediaKeys, useTourStore } from "@/lib/store";
-import type { Tour } from "@/lib/types";
+import { deleteTour, type TourSummary } from "@/lib/tours-api";
 
-export function TourCard({ tour }: { tour: Tour }) {
-  const deleteTour = useTourStore((s) => s.deleteTour);
+export function TourCard({ tour, onDeleted }: { tour: TourSummary; onDeleted: (tourId: string) => void }) {
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const { exporting, exportTour } = useTourExport();
-  const cover = coverScene(tour);
-  const sceneCount = tour.sceneOrder.length;
+  const sceneCount = tour.sceneCount;
   const editHref = `/tours/${tour.id}/edit`;
 
-  function handleDelete() {
-    const removed = deleteTour(tour.id);
-    if (!removed) return;
-    deleteMedia(tourMediaKeys(removed)).catch(() => undefined);
-    toast.success(`Deleted “${removed.title}”`);
+  async function handleDelete() {
+    setDeleting(true);
+    try {
+      await deleteTour(tour.id);
+      onDeleted(tour.id);
+      toast.success(`Deleted “${tour.title}”`);
+    } catch (error) {
+      toast.error(`Couldn't delete “${tour.title}”`, { description: errorMessage(error) });
+      setDeleting(false);
+    }
   }
 
   return (
-    <li className="group/card relative flex flex-col overflow-hidden rounded-xl bg-card ring-1 ring-foreground/10 transition-[box-shadow,transform] duration-200 ease-out focus-within:ring-2 focus-within:ring-ring hover:-translate-y-0.5 hover:shadow-[0_12px_32px_-12px_oklch(0_0_0/0.6)] hover:ring-foreground/20 motion-reduce:hover:translate-y-0">
+    <li
+      aria-busy={deleting}
+      className="group/card relative flex flex-col overflow-hidden rounded-xl bg-card ring-1 ring-foreground/10 transition-[box-shadow,transform,opacity] duration-200 ease-out focus-within:ring-2 focus-within:ring-ring hover:-translate-y-0.5 hover:shadow-[0_12px_32px_-12px_oklch(0_0_0/0.6)] hover:ring-foreground/20 aria-busy:opacity-50 motion-reduce:hover:translate-y-0"
+    >
       <div className="relative aspect-video overflow-hidden bg-muted">
         <MediaImage
-          mediaKey={cover?.thumbKey}
+          src={tour.coverThumbUrl}
           alt=""
           className="size-full transition-transform duration-500 ease-out group-hover/card:scale-[1.03] motion-reduce:group-hover/card:scale-100"
         />
@@ -98,7 +104,7 @@ export function TourCard({ tour }: { tour: Tour }) {
               Export as .zip
             </DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuItem variant="destructive" onSelect={() => setConfirmOpen(true)}>
+            <DropdownMenuItem variant="destructive" disabled={deleting} onSelect={() => setConfirmOpen(true)}>
               <Trash2 />
               Delete tour
             </DropdownMenuItem>
@@ -111,13 +117,13 @@ export function TourCard({ tour }: { tour: Tour }) {
           <AlertDialogHeader>
             <AlertDialogTitle>Delete “{tour.title}”?</AlertDialogTitle>
             <AlertDialogDescription>
-              The tour and its {plural(sceneCount, "photo")} are removed from this browser. This
+              The tour and its {plural(sceneCount, "photo")} are deleted from your account. This
               can&apos;t be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Keep tour</AlertDialogCancel>
-            <AlertDialogAction variant="destructive" onClick={handleDelete}>
+            <AlertDialogAction variant="destructive" onClick={() => void handleDelete()}>
               Delete tour
             </AlertDialogAction>
           </AlertDialogFooter>

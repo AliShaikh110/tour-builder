@@ -11,6 +11,5 @@ export default defineConfig({
     environment: "jsdom",
     include: ["**/__tests__/**/*.test.ts"],
     exclude: ["node_modules/**", ".next/**"],
-    setupFiles: ["fake-indexeddb/auto"],
   },
 });

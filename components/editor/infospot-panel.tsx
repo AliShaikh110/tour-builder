@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { infospotGlyphHtml } from "@/components/viewer/spot-markup";
+import { errorMessage } from "@/lib/api";
 import { IMAGE_ACCEPT, importInfospotImage, isAcceptedImage } from "@/lib/image";
 import { INFOSPOT_ICONS, INFOSPOT_KINDS, infospotProblem } from "@/lib/infospots";
 import type { Infospot, InfospotKind, Tour } from "@/lib/types";
@@ -44,9 +45,11 @@ function PreviewText({ spot, onChange, hint }: { spot: Infospot; onChange: (text
 }
 
 function ImageField({
+  tourId,
   spot,
   onUploaded,
 }: {
+  tourId: string;
   spot: Infospot;
   onUploaded: (key: string) => void;
 }) {
@@ -63,9 +66,9 @@ function ImageField({
     }
     setBusy(true);
     try {
-      onUploaded(await importInfospotImage(file));
-    } catch {
-      toast.error(`Couldn't read ${file.name}`);
+      onUploaded(await importInfospotImage(tourId, file));
+    } catch (error) {
+      toast.error(`Couldn't upload ${file.name}`, { description: errorMessage(error) });
     } finally {
       setBusy(false);
     }
@@ -209,6 +212,7 @@ export function InfospotPanel({
                     <>
                       <PreviewText spot={spot} onChange={(previewText) => patch({ previewText })} />
                       <ImageField
+                        tourId={tour.id}
                         spot={spot}
                         onUploaded={(imageKey) =>
                           onChange({ ...draft, spot: { ...spot, imageKey }, uploads: [...draft.uploads, imageKey] })

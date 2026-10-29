@@ -1,10 +1,10 @@
 "use client";
 
 import type { Viewer } from "@photo-sphere-viewer/core";
-import { MapPinOff } from "lucide-react";
+import { CloudAlert, MapPinOff } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { use, useCallback, useRef, useState, type MouseEvent } from "react";
+import { use, useCallback, useReducer, useRef, useState, type MouseEvent } from "react";
 import { toast } from "sonner";
 import { ConnectScenesMap } from "@/components/map/connect-scenes";
 import { Button } from "@/components/ui/button";
@@ -13,6 +13,7 @@ import { plural } from "@/lib/format";
 import { normalizeAngle, radToDeg } from "@/lib/geometry";
 import { arrivalView } from "@/lib/navigation";
 import { useTour, useTourStore } from "@/lib/store";
+import { forgetTourLoad, loadTour } from "@/lib/tours-api";
 import type { CameraView, LinkHotspot, Scene, Tour } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { BottomToolbar } from "./bottom-toolbar";
@@ -33,10 +34,9 @@ function TourNotFound() {
   return (
     <main className="mx-auto flex min-h-dvh max-w-md flex-col items-center justify-center px-4 text-center">
       <MapPinOff className="size-8 text-muted-foreground" aria-hidden="true" />
-      <h1 className="mt-4 text-xl font-semibold">This tour isn&apos;t in this browser</h1>
+      <h1 className="mt-4 text-xl font-semibold">We couldn&apos;t find this tour</h1>
       <p className="mt-2 text-sm text-muted-foreground">
-        Tours are saved in the browser that created them. It may have been deleted, or created
-        somewhere else.
+        It may have been deleted, or it belongs to another account.
       </p>
       <Button asChild className="mt-6">
         <Link href="/">Back to your tours</Link>
@@ -45,10 +45,42 @@ function TourNotFound() {
   );
 }
 
+function TourLoadError({ message, onRetry }: { message: string; onRetry: () => void }) {
+  return (
+    <main className="mx-auto flex min-h-dvh max-w-md flex-col items-center justify-center px-4 text-center" role="alert">
+      <CloudAlert className="size-8 text-muted-foreground" aria-hidden="true" />
+      <h1 className="mt-4 text-xl font-semibold">Couldn&apos;t open the tour</h1>
+      <p className="mt-2 text-sm text-muted-foreground">{message}</p>
+      <div className="mt-6 flex gap-2">
+        <Button onClick={onRetry}>Try again</Button>
+        <Button asChild variant="ghost">
+          <Link href="/">Back to your tours</Link>
+        </Button>
+      </div>
+    </main>
+  );
+}
+
 export function Editor({ params }: { params: Promise<{ tourId: string }> }) {
   const { tourId } = use(params);
+  const [, retry] = useReducer((attempt: number) => attempt + 1, 0);
+  // Suspends (showing the skeleton) until the tour has come from the server.
+  const load = use(loadTour(tourId));
   const tour = useTour(tourId);
-  return tour ? <EditorWorkspace tour={tour} /> : <TourNotFound />;
+
+  if (load.ok && tour) return <EditorWorkspace tour={tour} />;
+  if (!load.ok && load.status !== 400 && load.status !== 404) {
+    return (
+      <TourLoadError
+        message={load.message}
+        onRetry={() => {
+          forgetTourLoad(tourId);
+          retry();
+        }}
+      />
+    );
+  }
+  return <TourNotFound />;
 }
 
 const VIEWER_PLUGINS: ViewerPlugins = { markers: { defaultHoverScale: false } };

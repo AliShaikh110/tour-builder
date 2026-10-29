@@ -82,9 +82,9 @@ export interface MapPosition {
 export interface Scene {
   id: string;
   name: string;
-  /** IndexedDB key of the full image. */
+  /** Media key (id of the uploaded file on the backend) of the full image. */
   mediaKey: string;
-  /** IndexedDB key of the 512 px thumbnail. */
+  /** Media key of the 512 px thumbnail. */
   thumbKey: string;
   displayType: DisplayType;
   width: number;

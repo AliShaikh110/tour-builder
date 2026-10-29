@@ -1,14 +1,21 @@
 import { DEFAULT_ZOOM } from "./constants";
 import { degToRad } from "./geometry";
 import { importImage } from "./image";
-import { deleteMedia } from "./media-db";
 import {
   addScenesToTour,
   createHotspotRecord,
   createSceneRecord,
   createTourRecord,
+  type NewTourInput,
 } from "./store";
 import type { Scene, Tour } from "./types";
+
+export const DEMO_TOUR_INFO: NewTourInput = {
+  title: "Cape Florida Lighthouse (demo)",
+  category: "parks-rec",
+  address: "Cape Florida Light, Key Biscayne, FL",
+  audience: "me",
+};
 
 const DEMO_BASE_URL = "https://photo-sphere-viewer-data.netlify.app/assets/tour/";
 
@@ -29,21 +36,20 @@ const DEMO_LINKS: [number, number, number, number][] = [
 ];
 
 /**
- * Downloads the demo panoramas into IndexedDB and returns a linked tour.
- * The caller inserts it into the store.
+ * Downloads the demo panoramas, uploads them to the tour `tourId` and returns
+ * its linked content. The caller saves it (or deletes the tour on failure).
  */
 export async function buildDemoTour(
+  tourId: string,
   onProgress?: (done: number, total: number) => void,
 ): Promise<Tour> {
-  const savedKeys: string[] = [];
   let done = 0;
-  // allSettled so no download is still writing blobs when we clean up.
+  // allSettled so no upload is still running when the caller cleans up.
   const results = await Promise.allSettled(
     DEMO_SCENES.map(async (def): Promise<Scene> => {
       const response = await fetch(DEMO_BASE_URL + def.file);
       if (!response.ok) throw new Error(`Download failed (${response.status})`);
-      const image = await importImage(await response.blob(), { displayType: "360" });
-      savedKeys.push(image.mediaKey, image.thumbKey);
+      const image = await importImage(tourId, await response.blob(), { displayType: "360" });
       onProgress?.(++done, DEMO_SCENES.length);
       return {
         ...createSceneRecord({ name: def.name, ...image }),
@@ -58,10 +64,7 @@ export async function buildDemoTour(
 
   const scenes: Scene[] = [];
   for (const result of results) {
-    if (result.status === "rejected") {
-      await deleteMedia(savedKeys).catch(() => undefined);
-      throw result.reason;
-    }
+    if (result.status === "rejected") throw result.reason;
     scenes.push(result.value);
   }
 
@@ -71,11 +74,5 @@ export async function buildDemoTour(
     );
   }
 
-  const tour = createTourRecord({
-    title: "Cape Florida Lighthouse (demo)",
-    category: "parks-rec",
-    address: "Cape Florida Light, Key Biscayne, FL",
-    audience: "me",
-  });
-  return addScenesToTour(tour, scenes);
+  return addScenesToTour(createTourRecord(DEMO_TOUR_INFO), scenes);
 }

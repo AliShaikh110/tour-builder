@@ -1,6 +1,4 @@
-import { nanoid } from "nanoid";
 import { create } from "zustand";
-import { createJSONStorage, persist } from "zustand/middleware";
 import { DEFAULT_SETTINGS } from "./constants";
 import { LINKBACK_PITCH, linkbackYaw } from "./geometry";
 import type {
@@ -16,6 +14,7 @@ import type {
   TourCategory,
   TourSettings,
 } from "./types";
+import { newId } from "./utils";
 
 export interface NewTourInput {
   title: string;
@@ -64,7 +63,7 @@ export function mergeSettings(settings: TourSettings, patch: SettingsPatch): Tou
 export function createTourRecord(input: NewTourInput, now = Date.now()): Tour {
   const address = input.address?.trim();
   return {
-    id: nanoid(10),
+    id: newId(),
     title: input.title.trim() || "Untitled tour",
     category: input.category,
     ...(address ? { address } : {}),
@@ -80,7 +79,7 @@ export function createTourRecord(input: NewTourInput, now = Date.now()): Tour {
 
 export function createSceneRecord(input: NewSceneInput): Scene {
   return {
-    id: nanoid(10),
+    id: newId(),
     name: input.name.trim() || "Untitled scene",
     mediaKey: input.mediaKey,
     thumbKey: input.thumbKey,
@@ -102,7 +101,7 @@ export function createHotspotRecord(
   overrides: Partial<Omit<LinkHotspot, "id" | "targetSceneId" | "position">> = {},
 ): LinkHotspot {
   return {
-    id: nanoid(10),
+    id: newId(),
     targetSceneId,
     position,
     style: "disc",
@@ -331,7 +330,7 @@ export function applyHotspotStyle(tour: Tour, style: HotspotStyle, now = Date.no
   return { ...tour, scenes, updatedAt: now };
 }
 
-/** Every IndexedDB key a tour references (for cleanup on delete). */
+/** Every media key (uploaded file) a tour references, e.g. for the .zip export. */
 export function tourMediaKeys(tour: Tour): string[] {
   const keys: string[] = [];
   for (const scene of Object.values(tour.scenes)) {
@@ -340,23 +339,6 @@ export function tourMediaKeys(tour: Tour): string[] {
   }
   if (tour.settings.ambientSoundKey) keys.push(tour.settings.ambientSoundKey);
   return keys;
-}
-
-export interface StoredTours {
-  tours: Record<string, Tour>;
-}
-
-/** Upgrades tours saved by an older version of the store. */
-export function migrateStoredTours(state: StoredTours, version: number): StoredTours {
-  let tours = state?.tours ?? {};
-  if (version < 2) {
-    // v2: hotspots open a scene at its initial view by default. The setting
-    // used to default to off, so tours saved before then turn it on.
-    tours = Object.fromEntries(
-      Object.entries(tours).map(([id, tour]) => [id, { ...tour, settings: { ...tour.settings, enforceInitialViews: true } }]),
-    );
-  }
-  return { tours };
 }
 
 /** The scene shown on the dashboard card: the cover, else the first scene. */
@@ -369,10 +351,13 @@ export function coverScene(tour: Tour): Scene | undefined {
 // Store
 // ---------------------------------------------------------------------------
 
+/**
+ * The tours open in this tab. Edits apply here instantly; lib/autosave.ts
+ * sends each changed tour to the server shortly afterwards.
+ */
 interface TourStore {
   tours: Record<string, Tour>;
-  createTour: (input: NewTourInput) => string;
-  /** Adds a fully built tour (demo tour, import). */
+  /** Adds or replaces a whole tour (loaded from the server, or rebuilt by the map). */
   insertTour: (tour: Tour) => void;
   updateTour: (tourId: string, patch: TourPatch) => void;
   /** Returns the removed tour so the caller can delete its media. */
@@ -407,147 +392,130 @@ interface TourStore {
   deleteHotspot: (tourId: string, sceneId: string, hotspotId: string) => LinkHotspot | undefined;
 }
 
-export const useTourStore = create<TourStore>()(
-  persist(
-    (set, get) => {
-      const replaceTour = (tour: Tour) =>
-        set((state) => ({ tours: { ...state.tours, [tour.id]: tour } }));
+export const useTourStore = create<TourStore>()((set, get) => {
+  const replaceTour = (tour: Tour) =>
+    set((state) => ({ tours: { ...state.tours, [tour.id]: tour } }));
 
-      return {
-        tours: {},
+  return {
+    tours: {},
 
-        createTour: (input) => {
-          const tour = createTourRecord(input);
-          replaceTour(tour);
-          return tour.id;
-        },
+    insertTour: replaceTour,
 
-        insertTour: replaceTour,
-
-        updateTour: (tourId, patch) => {
-          const tour = get().tours[tourId];
-          if (!tour) return;
-          replaceTour({ ...tour, ...patch, updatedAt: Date.now() });
-        },
-
-        deleteTour: (tourId) => {
-          const tour = get().tours[tourId];
-          if (!tour) return undefined;
-          set((state) => {
-            const tours = { ...state.tours };
-            delete tours[tourId];
-            return { tours };
-          });
-          return tour;
-        },
-
-        addScenes: (tourId, inputs) => {
-          const tour = get().tours[tourId];
-          if (!tour) return [];
-          const scenes = inputs.map(createSceneRecord);
-          replaceTour(addScenesToTour(tour, scenes));
-          return scenes.map((s) => s.id);
-        },
-
-        deleteScene: (tourId, sceneId) => {
-          const tour = get().tours[tourId];
-          const scene = tour?.scenes[sceneId];
-          if (!tour || !scene) return undefined;
-          replaceTour(removeSceneFromTour(tour, sceneId));
-          return scene;
-        },
-
-        updateScene: (tourId, sceneId, patch) => {
-          const tour = get().tours[tourId];
-          const scene = tour?.scenes[sceneId];
-          if (!tour || !scene) return undefined;
-          replaceTour(updateSceneInTour(tour, sceneId, patch));
-          return scene;
-        },
-
-        reorderScenes: (tourId, order) => {
-          const tour = get().tours[tourId];
-          if (!tour) return;
-          const next = reorderTourScenes(tour, order);
-          if (next !== tour) replaceTour(next);
-        },
-
-        renameScenes: (tourId, names) => {
-          const tour = get().tours[tourId];
-          if (!tour) return;
-          const next = renameTourScenes(tour, names);
-          if (next !== tour) replaceTour(next);
-        },
-
-        resetInitialViews: (tourId) => {
-          const tour = get().tours[tourId];
-          if (!tour) return { initial: {}, arrival: [] };
-          const snapshot = captureViews(tour);
-          replaceTour(resetTourInitialViews(tour));
-          return snapshot;
-        },
-
-        restoreViews: (tourId, snapshot) => {
-          const tour = get().tours[tourId];
-          if (tour) replaceTour(restoreTourViews(tour, snapshot));
-        },
-
-        setArrivalView: (tourId, fromSceneId, toSceneId, view) => {
-          const tour = get().tours[tourId];
-          if (!tour) return;
-          const next = setTourArrivalView(tour, fromSceneId, toSceneId, view);
-          if (next !== tour) replaceTour(next);
-        },
-
-        saveInfospot: (tourId, sceneId, spot) => {
-          const tour = get().tours[tourId];
-          if (tour) replaceTour(upsertInfospot(tour, sceneId, spot));
-        },
-
-        updateSettings: (tourId, patch) => {
-          const tour = get().tours[tourId];
-          if (!tour) return undefined;
-          replaceTour({ ...tour, settings: mergeSettings(tour.settings, patch), updatedAt: Date.now() });
-          return tour.settings;
-        },
-
-        deleteInfospot: (tourId, sceneId, spotId) => {
-          const tour = get().tours[tourId];
-          const spot = tour?.scenes[sceneId]?.infospots.find((i) => i.id === spotId);
-          if (!tour || !spot) return undefined;
-          replaceTour(removeInfospot(tour, sceneId, spotId));
-          return spot;
-        },
-
-        saveHotspot: (tourId, sceneId, hotspot, options = {}) => {
-          let tour = get().tours[tourId];
-          if (!tour?.scenes[sceneId]) return { linkback: null };
-          tour = upsertHotspot(tour, sceneId, hotspot);
-          const linkback = options.linkback ? createLinkback(tour, sceneId, hotspot) : null;
-          if (linkback) tour = upsertHotspot(tour, hotspot.targetSceneId, linkback);
-          if (options.applyStyleToAll) tour = applyHotspotStyle(tour, hotspot.style);
-          replaceTour(tour);
-          return { linkback };
-        },
-
-        deleteHotspot: (tourId, sceneId, hotspotId) => {
-          const tour = get().tours[tourId];
-          const hotspot = tour?.scenes[sceneId]?.hotspots.find((h) => h.id === hotspotId);
-          if (!tour || !hotspot) return undefined;
-          replaceTour(removeHotspot(tour, sceneId, hotspotId));
-          return hotspot;
-        },
-      };
+    updateTour: (tourId, patch) => {
+      const tour = get().tours[tourId];
+      if (!tour) return;
+      replaceTour({ ...tour, ...patch, updatedAt: Date.now() });
     },
-    {
-      name: "tour-builder:tours",
-      version: 2,
-      storage: createJSONStorage(() => localStorage),
-      partialize: (state): StoredTours => ({ tours: state.tours }),
-      migrate: (persisted, version) => migrateStoredTours(persisted as StoredTours, version),
+
+    deleteTour: (tourId) => {
+      const tour = get().tours[tourId];
+      if (!tour) return undefined;
+      set((state) => {
+        const tours = { ...state.tours };
+        delete tours[tourId];
+        return { tours };
+      });
+      return tour;
     },
-  ),
-);
+
+    addScenes: (tourId, inputs) => {
+      const tour = get().tours[tourId];
+      if (!tour) return [];
+      const scenes = inputs.map(createSceneRecord);
+      replaceTour(addScenesToTour(tour, scenes));
+      return scenes.map((s) => s.id);
+    },
+
+    deleteScene: (tourId, sceneId) => {
+      const tour = get().tours[tourId];
+      const scene = tour?.scenes[sceneId];
+      if (!tour || !scene) return undefined;
+      replaceTour(removeSceneFromTour(tour, sceneId));
+      return scene;
+    },
+
+    updateScene: (tourId, sceneId, patch) => {
+      const tour = get().tours[tourId];
+      const scene = tour?.scenes[sceneId];
+      if (!tour || !scene) return undefined;
+      replaceTour(updateSceneInTour(tour, sceneId, patch));
+      return scene;
+    },
+
+    reorderScenes: (tourId, order) => {
+      const tour = get().tours[tourId];
+      if (!tour) return;
+      const next = reorderTourScenes(tour, order);
+      if (next !== tour) replaceTour(next);
+    },
+
+    renameScenes: (tourId, names) => {
+      const tour = get().tours[tourId];
+      if (!tour) return;
+      const next = renameTourScenes(tour, names);
+      if (next !== tour) replaceTour(next);
+    },
+
+    resetInitialViews: (tourId) => {
+      const tour = get().tours[tourId];
+      if (!tour) return { initial: {}, arrival: [] };
+      const snapshot = captureViews(tour);
+      replaceTour(resetTourInitialViews(tour));
+      return snapshot;
+    },
+
+    restoreViews: (tourId, snapshot) => {
+      const tour = get().tours[tourId];
+      if (tour) replaceTour(restoreTourViews(tour, snapshot));
+    },
+
+    setArrivalView: (tourId, fromSceneId, toSceneId, view) => {
+      const tour = get().tours[tourId];
+      if (!tour) return;
+      const next = setTourArrivalView(tour, fromSceneId, toSceneId, view);
+      if (next !== tour) replaceTour(next);
+    },
+
+    saveInfospot: (tourId, sceneId, spot) => {
+      const tour = get().tours[tourId];
+      if (tour) replaceTour(upsertInfospot(tour, sceneId, spot));
+    },
+
+    updateSettings: (tourId, patch) => {
+      const tour = get().tours[tourId];
+      if (!tour) return undefined;
+      replaceTour({ ...tour, settings: mergeSettings(tour.settings, patch), updatedAt: Date.now() });
+      return tour.settings;
+    },
+
+    deleteInfospot: (tourId, sceneId, spotId) => {
+      const tour = get().tours[tourId];
+      const spot = tour?.scenes[sceneId]?.infospots.find((i) => i.id === spotId);
+      if (!tour || !spot) return undefined;
+      replaceTour(removeInfospot(tour, sceneId, spotId));
+      return spot;
+    },
+
+    saveHotspot: (tourId, sceneId, hotspot, options = {}) => {
+      let tour = get().tours[tourId];
+      if (!tour?.scenes[sceneId]) return { linkback: null };
+      tour = upsertHotspot(tour, sceneId, hotspot);
+      const linkback = options.linkback ? createLinkback(tour, sceneId, hotspot) : null;
+      if (linkback) tour = upsertHotspot(tour, hotspot.targetSceneId, linkback);
+      if (options.applyStyleToAll) tour = applyHotspotStyle(tour, hotspot.style);
+      replaceTour(tour);
+      return { linkback };
+    },
+
+    deleteHotspot: (tourId, sceneId, hotspotId) => {
+      const tour = get().tours[tourId];
+      const hotspot = tour?.scenes[sceneId]?.hotspots.find((h) => h.id === hotspotId);
+      if (!tour || !hotspot) return undefined;
+      replaceTour(removeHotspot(tour, sceneId, hotspotId));
+      return hotspot;
+    },
+  };
+});
 
 export function useTour(tourId: string): Tour | undefined {
   return useTourStore((state) => state.tours[tourId]);
