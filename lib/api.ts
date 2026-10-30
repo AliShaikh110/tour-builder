@@ -1,7 +1,7 @@
 // The one place that talks to the backend (photo-sphere-backend).
 
 /** The backend's address, from NEXT_PUBLIC_API_URL in .env.local. */
-export const API_URL = (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000").replace(/\/+$/, "");
+export const API_URL = (process.env.API_BASE_URL ?? "http://localhost:4000").replace(/\/+$/, "");
 
 const TOKEN_KEY = "photo-sphere:token";
 
